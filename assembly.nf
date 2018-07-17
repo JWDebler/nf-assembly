@@ -60,7 +60,7 @@ process trimReads {
     """
     cp /opt/trimmomatic/current/adapters/NexteraPE-PE.fa .
 
-    java -jar /opt/trimmomatic/current/*.jar PE \
+    java -jar /opt/trimmomatic/current/trimmomatic.jar PE \
     -threads ${task.cpus} \
     fwd.fastq.gz rev.fastq.gz \
     paired.fwd.fastq.gz singles.fwd.fastq.gz \
