@@ -1,11 +1,19 @@
 #!/home/johannes/bin nextflow
 VERSION = "1.0.0"
 
-//ID of isolate you want to assemble
+//ID of isolate you want to assemble 
 params.isolate = "P94-24" 
 
 //Path to raw fastq.gz files
+//This pipeline can be run either targeted at individual isolates
+//or untargeted if you want to assemble and annotate everything
+//within the input folder
+
+//--> uncomment this for individual isolates
 params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/${params.isolate}*_R{1,2}_*fastq.gz"
+
+// --> uncomment this for all isolates in input folder
+//params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/*_R{1,2}_*fastq.gz"
 
 //Path where output data shall go
 params.outputdir = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/johannes/notebook/test"
@@ -17,6 +25,7 @@ reads = Channel.fromFilePairs(params.input).map {sampleID, fwdrevreads -> [sampl
 log.info "====================================================================="
 log.info "Assembly, RNA annotation and Genemark prediction version " + VERSION
 log.info "Isolate : ${params.isolate}"
+log.info "Input   : ${reads}"
 log.info "Output  : ${params.outputdir}/${params.isolate}"
 log.info "====================================================================="
 
