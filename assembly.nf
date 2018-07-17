@@ -1,6 +1,7 @@
 #!/home/johannes/bin nextflow
 VERSION = "1.0.0"
 
+//+++++++++++++++++ SETUP++++++++++++++++++++++++
 //ID of isolate you want to assemble 
 params.isolate = "P94-24" 
 
@@ -17,6 +18,7 @@ params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/L
 
 //Path where output data shall go
 params.outputdir = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/johannes/notebook/test"
+//+++++++++++++++++++++++++++++++++++++++++++++++
 
 //Create channel that provides the sampleID and the raw read files 
 reads = Channel.fromFilePairs(params.input).map {sampleID, fwdrevreads -> [sampleID.tokenize('_')[0], fwdrevreads]}
