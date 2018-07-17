@@ -25,7 +25,6 @@ reads = Channel.fromFilePairs(params.input).map {sampleID, fwdrevreads -> [sampl
 log.info "====================================================================="
 log.info "Assembly, RNA annotation and Genemark prediction version " + VERSION
 log.info "Isolate : ${params.isolate}"
-log.info "Input   : ${reads}"
 log.info "Output  : ${params.outputdir}/${params.isolate}"
 log.info "====================================================================="
 
