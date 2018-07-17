@@ -8,7 +8,7 @@ params.isolate = "P94-24"
 params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/${params.isolate}*_R{1,2}_*fastq.gz"
 
 //Path where output data shall go
-params.outputdir = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/johannes/notebook/2017_illumina"
+params.outputdir = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/johannes/notebook/test"
 
 //Create channel that provides the sampleID and the raw read files 
 reads = Channel.fromFilePairs(params.input).map {sampleID, fwdrevreads -> [sampleID.tokenize('_')[0], fwdrevreads]}
@@ -147,7 +147,7 @@ process annotation_genemark {
 	set sampleID, "scaffolds.clean.fasta" from scaffoldsRawForGenemark
 
     output:
-	set sampleID, "genemark.gtf"
+	set sampleID, "${sampleID}.genemark.gtf"
 
     """
     /opt/genemark-ES/gmes_petap.pl --ES --fungus --cores ${task.cpus} --sequence scaffolds.clean.fasta
@@ -163,7 +163,7 @@ process annotation_trnascan {
 	set sampleID, "scaffolds.clean.fasta" from scaffoldsRawForTRNAscan
 
     output:
-	set sampleID, "trnascanSE.gff3"
+	set sampleID, "${sampleID}.trnascanSE.gff3"
     """
     /home/johannes/local/bin/tRNAscan-SE -o trnascanoutput.out scaffolds.clean.fasta 
     /home/johannes/scripts/convert_tRNAScanSE_to_gff3.pl --input=trnascanoutput.out > trnascanSE.gff3
@@ -198,7 +198,7 @@ process infernalToGff3 {
 	set sampleID, "scaffolds.cmscan.tbl" from infernalToGff3
 
     output:
-	set sampleID, "infernal.gff3"
+	set sampleID, "${sampleID}.infernal.gff3"
     """
     grep -v ^# scaffolds.cmscan.tbl > scaffolds.cmscan.clean.tbl && awk '{printf "%s\tinfernal\t%s\t%d\t%d\t%s\t%s\t.\tNote=RfamID-%s\\n" ,\$4,\$2,\$10,\$11,\$17,\$12,\$3}'  scaffolds.cmscan.clean.tbl > infernal.gff3
     """
