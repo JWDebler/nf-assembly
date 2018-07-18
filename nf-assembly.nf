@@ -21,7 +21,9 @@ params.outputdir = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/johannes/n
 //+++++++++++++++++++++++++++++++++++++++++++++++
 
 //Create channel that provides the sampleID and the raw read files 
-reads = Channel.fromFilePairs(params.input).map {sampleID, fwdrevreads -> [sampleID.tokenize('_')[0], fwdrevreads]}
+reads = Channel
+.fromFilePairs(params.input)
+.map {sampleID, fwdrevreads -> [sampleID.tokenize('_')[0], fwdrevreads]}
 
 
 log.info "====================================================================="
