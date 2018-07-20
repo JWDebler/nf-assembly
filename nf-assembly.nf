@@ -4,7 +4,8 @@ VERSION = "1.0.0"
 //+++++++++++++++++ SETUP++++++++++++++++++++++++
 //ID of isolate you want to assemble 
 params.isolate = "P94-24" 
-
+//point this to the scripts directory of this repository
+params.scripts = "/home/johannes/rdrive/Johannes-DEBLEJ-SE00276/bioinformatics/nf-assembly/scripts"
 //Path to raw fastq.gz files
 //This pipeline can be run either targeted at individual isolates
 //or untargeted if you want to assemble and annotate everything
@@ -178,7 +179,7 @@ process annotation_trnascan {
 	set sampleID, "${sampleID}.trnascanSE.gff3"
     """
     /home/johannes/local/bin/tRNAscan-SE -o trnascanoutput.out scaffolds.clean.fasta 
-    /home/johannes/scripts/convert_tRNAScanSE_to_gff3.pl --input=trnascanoutput.out > trnascanSE.gff3
+    ${params.scripts}/convert_tRNAScanSE_to_gff3.pl --input=trnascanoutput.out > ${sampleID}.trnascanSE.gff3
     """
 }
 
