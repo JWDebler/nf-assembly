@@ -27,11 +27,11 @@ reads = Channel
 .map {sampleID, fwdrevreads -> [sampleID.tokenize('_')[0], fwdrevreads]}
 
 
-log.info "====================================================================="
-log.info "Assembly, RNA annotation and Genemark prediction version " + VERSION
+log.info "=============================================================================="
+log.info "Illumina assembly, RNA annotation and Genemark prediction version " + VERSION
 log.info "Isolate : ${params.isolate}"
 log.info "Output  : ${params.outputdir}/${params.isolate}"
-log.info "====================================================================="
+log.info "=============================================================================="
 
 
 reads
