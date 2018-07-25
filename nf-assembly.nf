@@ -44,8 +44,6 @@ reads
 process combineReads {
     tag {sampleID}
 
-    publishDir "${params.outputdir}/${sampleID}/01-combinedReads", mode: 'copy'
-
     input:
     set sampleID, "fwd.*.fastq.gz", "rev.*.fastq.gz" from rawReads
 
@@ -62,7 +60,6 @@ process combineReads {
 process trimReads {
     tag {sampleID}
     cpus 5
-    publishDir "${params.outputdir}/${sampleID}/02-trimmedReads/", mode: 'copy'
         
     input:
     set sampleID, "fwd.fastq.gz", "rev.fastq.gz" from rawCombinedReads
@@ -87,7 +84,7 @@ process trimReads {
 //SPAdes assembly
 process assemble {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/03-assembly/spades/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/01-assembly/spades/", mode: 'copy'
     memory '25G'
     cpus 10
 
@@ -100,13 +97,13 @@ process assemble {
 
     """
     /opt/spades/current/bin/spades.py \
-    -k 21,33,55,77,99,127 \
+    -k 33,55,77,99 \
     --memory ${task.memory.toGiga()} \
     --threads ${task.cpus} \
     --careful \
-    --pe1-1 paired.fwd.fastq.gz \
-    --pe1-2 paired.rev.fastq.gz \
-    --pe1-s singletons.fastq.gz \
+    -1 paired.fwd.fastq.gz \
+    -2 paired.rev.fastq.gz \
+    -s singletons.fastq.gz \
     -o .
     mv scaffolds.fasta ${sampleID}.scaffolds.fasta
     mv contigs.fasta ${sampleID}.contigs.fasta
@@ -116,7 +113,7 @@ process assemble {
 
 process cleanupSpadesOutput {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/03-assembly/spades/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/01-assembly/spades/", mode: 'copy'
 
     input:
 	set sampleID, "${sampleID}.scaffolds.fasta" from cleanup
@@ -158,7 +155,7 @@ process cleanupSpadesOutput {
 process annotation_genemark {
     tag {sampleID}
     cpus 10
-    publishDir "${params.outputdir}/${sampleID}/04-annotation/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
 
     input:
 	set sampleID, "${sampleID}.scaffolds.clean.fasta" from scaffoldsRawForGenemark
@@ -175,7 +172,7 @@ process annotation_genemark {
 //tRNA annotation with tRNAscanSE
 process annotation_trnascan {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/04-annotation/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
 
     input:
 	set sampleID, "${sampleID}.scaffolds.clean.fasta" from scaffoldsRawForTRNAscan
@@ -210,7 +207,7 @@ process annotaton_infernal {
 //infernal output conversion to GFF3
 process infernalToGff3 {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/04-annotation/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
 
     input:
 	set sampleID, "scaffolds.cmscan.tbl" from infernalToGff3
