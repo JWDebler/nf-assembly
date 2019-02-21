@@ -44,6 +44,8 @@ reads
 process combineReads {
     tag {sampleID}
 
+    publishDir "${params.outputdir}/${sampleID}/00-rawReads/", mode: 'copy'
+
     input:
     set sampleID, "fwd.*.fastq.gz", "rev.*.fastq.gz" from rawReads
 
@@ -60,6 +62,8 @@ process combineReads {
 process trimReads {
     tag {sampleID}
     cpus 5
+
+    publishDir "${params.outputdir}/${sampleID}/00-trimmedReads/", mode: 'copy'
         
     input:
     set sampleID, "fwd.fastq.gz", "rev.fastq.gz" from rawCombinedReads
@@ -92,8 +96,8 @@ process assemble {
     set sampleID, "paired.fwd.fastq.gz", "paired.rev.fastq.gz", "singletons.fastq.gz" from trimmedReads
 
     output:
-    set sampleID, "${sampleID}.contigs.fasta" into contigsRaw
-    set sampleID, "${sampleID}.scaffolds.fasta" into cleanup
+    set sampleID, "${sampleID}.contigs.fasta" into contigsForCleanup
+    set sampleID, "${sampleID}.scaffolds.fasta" into scaffoldsForCleanup
 
     """
     /opt/spades/current/bin/spades.py \
@@ -111,17 +115,14 @@ process assemble {
     """
 }
 
-process cleanupSpadesOutput {
+process cleanupSpadesOutputScaffolds {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/01-assembly/spades/", mode: 'copy'
-
+    
     input:
-	set sampleID, "${sampleID}.scaffolds.fasta" from cleanup
+	set sampleID, "${sampleID}.scaffolds.fasta" from scaffoldsForCleanup
 
     output:
-    set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForGenemark
-    set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForTRNAscan
-    set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForInfernal
+    set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsForHeaderadjustment
 
     """
     #!/usr/bin/env ruby
@@ -151,8 +152,79 @@ process cleanupSpadesOutput {
     """
 }
 
+process cleanupSpadesOutputContigs {
+    tag {sampleID}
+    
+    input:
+	set sampleID, "${sampleID}.contigs.fasta" from contigsForCleanup
+
+    output:
+    set sampleID, "${sampleID}.contigs.clean.fasta" into contigsForHeaderadjustment
+
+    """
+    #!/usr/bin/env ruby
+
+    require 'optparse'
+    require 'bio'
+    require 'pp'
+
+    options = {:prefix => nil}
+    OptionParser.new do |opts|
+      opts.banner = "Usage: fix_names.rb [options] input.fasta"
+
+      opts.on("-p", "--prefix [NAME]", "Strain prefix to prepend to contig name") do |p|
+        options[:prefix] = p + "_"
+      end
+    end.parse!
+    out = File.open("${sampleID}.contigs.clean.fasta", 'w')
+    Bio::FlatFile
+    .open("${sampleID}.contigs.fasta")
+    .sort_by{|entry| entry.length}
+    .reverse
+    .each
+    .with_index(1)
+    .map{|entry, i| [entry, "%sctg%d" % [options[:prefix], i]]}
+    .each{|entry, name| out.puts entry.seq.to_fasta(name, 80)}
+    out.close
+    """
+}
+
+process addSpeciesNameToFastaHeadersScaffolds {
+    tag {sampleID}
+    publishDir "${params.outputdir}/${sampleID}/01-assembly/spades/", mode: 'copy'
+
+    input:
+    set sampleID, "${sampleID}.scaffolds.clean.fasta" from scaffoldsForHeaderadjustment
+
+    output:
+    set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForGenemark
+    set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForTRNAscan
+    set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForInfernal
+
+    """
+    sed 's,>,&${sampleID}_,g' -i ${sampleID}.scaffolds.clean.fasta
+    """
+}
+
+process addSpeciesNameToFastaHeadersContigs {
+    tag {sampleID}
+    publishDir "${params.outputdir}/${sampleID}/01-assembly/spades/", mode: 'copy'
+
+    input:
+    set sampleID, "${sampleID}.contigs.clean.fasta" from contigsForHeaderadjustment
+
+    output:
+    set sampleID, "${sampleID}.contigs.clean.fasta" into contigsRawForGenemark
+    set sampleID, "${sampleID}.contigs.clean.fasta" into contigsRawForTRNAscan
+    set sampleID, "${sampleID}.contigs.clean.fasta" into contigsRawForInfernal
+
+    """
+    sed 's,>,&${sampleID}_,g' -i ${sampleID}.contigs.clean.fasta
+    """
+}
+
 //GenemarkES annotation
-process annotation_genemark {
+process annotation_genemark_scaffolds {
     tag {sampleID}
     cpus 10
     publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
@@ -161,16 +233,33 @@ process annotation_genemark {
 	set sampleID, "${sampleID}.scaffolds.clean.fasta" from scaffoldsRawForGenemark
 
     output:
-	set sampleID, "${sampleID}.genemark.gtf"
+	set sampleID, "${sampleID}.scaffolds.genemark.gtf"
 
     """
     /opt/genemark-ES/gmes_petap.pl --ES --fungus --cores ${task.cpus} --sequence ${sampleID}.scaffolds.clean.fasta
-    mv genemark.gtf ${sampleID}.genemark.gtf
+    mv genemark.gtf ${sampleID}.scaffolds.genemark.gtf
+    """
+}
+
+process annotation_genemark_contigs {
+    tag {sampleID}
+    cpus 10
+    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
+
+    input:
+	set sampleID, "${sampleID}.contigs.clean.fasta" from contigsRawForGenemark
+
+    output:
+	set sampleID, "${sampleID}.contigs.genemark.gtf"
+
+    """
+    /opt/genemark-ES/gmes_petap.pl --ES --fungus --cores ${task.cpus} --sequence ${sampleID}.contigs.clean.fasta
+    mv genemark.gtf ${sampleID}.contigs.genemark.gtf
     """
 }
 
 //tRNA annotation with tRNAscanSE
-process annotation_trnascan {
+process annotation_trnascan_scaffolds {
     tag {sampleID}
     publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
 
@@ -178,15 +267,30 @@ process annotation_trnascan {
 	set sampleID, "${sampleID}.scaffolds.clean.fasta" from scaffoldsRawForTRNAscan
 
     output:
-	set sampleID, "${sampleID}.trnascanSE.gff3"
+	set sampleID, "${sampleID}.scaffolds.trnascanSE.gff3"
     """
     /home/johannes/local/bin/tRNAscan-SE -o trnascanoutput.out ${sampleID}.scaffolds.clean.fasta 
-    ${params.scripts}/convert_tRNAScanSE_to_gff3.pl --input=trnascanoutput.out > ${sampleID}.trnascanSE.gff3
+    ${params.scripts}/convert_tRNAScanSE_to_gff3.pl --input=trnascanoutput.out > ${sampleID}.scaffolds.trnascanSE.gff3
+    """
+}
+
+process annotation_trnascan_contigs {
+    tag {sampleID}
+    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
+
+    input:
+	set sampleID, "${sampleID}.contigs.clean.fasta" from contigsRawForTRNAscan
+
+    output:
+	set sampleID, "${sampleID}.contigs.trnascanSE.gff3"
+    """
+    /home/johannes/local/bin/tRNAscan-SE -o trnascanoutput.out ${sampleID}.contigs.clean.fasta 
+    ${params.scripts}/convert_tRNAScanSE_to_gff3.pl --input=trnascanoutput.out > ${sampleID}.contigs.trnascanSE.gff3
     """
 }
 
 //RNA annotation with infernal
-process annotaton_infernal {
+process annotaton_infernal_scaffolds {
     tag {sampleID}
     cpus 10
     
@@ -194,7 +298,7 @@ process annotaton_infernal {
 	set sampleID, "${sampleID}.scaffolds.clean.fasta" from scaffoldsRawForInfernal
 
     output:
-	set sampleID, "scaffolds.cmscan.tbl" into infernalToGff3
+	set sampleID, "scaffolds.cmscan.tbl" into infernalToGff3scaffolds
     """
     wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/13.0/Rfam.clanin
     wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/13.0/Rfam.cm.gz
@@ -204,18 +308,50 @@ process annotaton_infernal {
     """
 }
 
+process annotaton_infernal_contigs {
+    tag {sampleID}
+    cpus 10
+    
+    input:
+	set sampleID, "${sampleID}.contigs.clean.fasta" from contigsRawForInfernal
+
+    output:
+	set sampleID, "contigs.cmscan.tbl" into infernalToGff3contigs
+    """
+    wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/13.0/Rfam.clanin
+    wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/13.0/Rfam.cm.gz
+    gzip -d Rfam.cm.gz
+    cmpress Rfam.cm
+    cmscan --rfam --cpu ${task.cpus} --cut_ga --nohmmonly --tblout contigs.cmscan.tbl --fmt 2 --clanin Rfam.clanin Rfam.cm ${sampleID}.contigs.clean.fasta > infernal.cmscan
+    """
+}
+
 //infernal output conversion to GFF3
-process infernalToGff3 {
+process infernalToGff3scaffolds {
     tag {sampleID}
     publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
 
     input:
-	set sampleID, "scaffolds.cmscan.tbl" from infernalToGff3
+	set sampleID, "scaffolds.cmscan.tbl" from infernalToGff3scaffolds
 
     output:
-	set sampleID, "${sampleID}.infernal.gff3"
+	set sampleID, "${sampleID}.scaffolds.infernal.gff3"
     """
-    grep -v ^# scaffolds.cmscan.tbl > scaffolds.cmscan.clean.tbl && awk '{printf "%s\tinfernal\t%s\t%d\t%d\t%s\t%s\t.\tNote=RfamID-%s\\n" ,\$4,\$2,\$10,\$11,\$17,\$12,\$3}'  scaffolds.cmscan.clean.tbl > ${sampleID}.infernal.gff3
+    grep -v ^# scaffolds.cmscan.tbl > scaffolds.cmscan.clean.tbl && awk '{printf "%s\tinfernal\t%s\t%d\t%d\t%s\t%s\t.\tNote=RfamID-%s\\n" ,\$4,\$2,\$10,\$11,\$17,\$12,\$3}'  scaffolds.cmscan.clean.tbl > ${sampleID}.scaffolds.infernal.gff3
+    """
+}
+
+process infernalToGff3contigs {
+    tag {sampleID}
+    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
+
+    input:
+	set sampleID, "contigs.cmscan.tbl" from infernalToGff3contigs
+
+    output:
+	set sampleID, "${sampleID}.contigs.infernal.gff3"
+    """
+    grep -v ^# contigs.cmscan.tbl > contigs.cmscan.clean.tbl && awk '{printf "%s\tinfernal\t%s\t%d\t%d\t%s\t%s\t.\tNote=RfamID-%s\\n" ,\$4,\$2,\$10,\$11,\$17,\$12,\$3}'  contigs.cmscan.clean.tbl > ${sampleID}.contigs.infernal.gff3
     """
 }
 
