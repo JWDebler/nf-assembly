@@ -300,8 +300,8 @@ process annotaton_infernal_scaffolds {
     output:
 	set sampleID, "scaffolds.cmscan.tbl" into infernalToGff3scaffolds
     """
-    wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/13.0/Rfam.clanin
-    wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/13.0/Rfam.cm.gz
+    wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/14.1/Rfam.clanin
+    wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/14.1/Rfam.cm.gz
     gzip -d Rfam.cm.gz
     cmpress Rfam.cm
     cmscan --rfam --cpu ${task.cpus} --cut_ga --nohmmonly --tblout scaffolds.cmscan.tbl --fmt 2 --clanin Rfam.clanin Rfam.cm ${sampleID}.scaffolds.clean.fasta > infernal.cmscan
