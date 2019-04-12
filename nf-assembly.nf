@@ -1,31 +1,39 @@
 #!/home/johannes/bin nextflow
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 //+++++++++++++++++ SETUP++++++++++++++++++++++++
-//ID of isolate you want to assemble 
-params.isolate = "P94-24" 
-//point this to the scripts directory of this repository
-params.scripts = "/home/johannes/rdrive/Johannes-DEBLEJ-SE00276/bioinformatics/nf-assembly/scripts"
-//Path to raw fastq.gz files
-//This pipeline can be run either targeted at individual isolates
-//or untargeted if you want to assemble and annotate everything
-//within the input folder
+// setup paths to programs 
+params.trimmomatic = "/opt/trimmomatic/current/trimmomatic*.jar"
+params.spades = "/opt/spades/current/bin/spades.py"
+params.genemark = "/opt/genemark-ES/gmes_petap.pl"
+params.infernal_cmpress = "cmpress"
+params.infernal_cmscan = "cmscan"
+params.trnascan = "tRNAscan-SE"
 
-//--> uncomment this for individual isolates
-params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/${params.isolate}*_R{1,2}_*fastq.gz"
+// point this to the scripts directory of this repository
+params.scripts = "/home/johannes/rdrive/Johannes-DEBLEJ-SE00276/bioinformatics/nf-assembly/scripts"
+
+// Path to raw fastq.gz files
+// This pipeline can be run either targeted at individual isolates
+// or untargeted if you want to assemble and annotate everything
+// within the input folder
+
+// --> uncomment this for individual isolates
+// ID of isolate you want to assemble
+// params.isolate = "P94-24" 
+// params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/${params.isolate}*_R{1,2}_*fastq.gz"
 
 // --> uncomment this for all isolates in input folder
-//params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/*_R{1,2}_*fastq.gz"
+params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/*_R{1,2}_*fastq.gz"
 
-//Path where output data shall go
+// Path where output data shall go
 params.outputdir = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/johannes/notebook/test"
 //+++++++++++++++++++++++++++++++++++++++++++++++
 
-//Create channel that provides the sampleID and the raw read files 
+// Create channel that provides the sampleID and the raw read files 
 reads = Channel
 .fromFilePairs(params.input)
 .map {sampleID, fwdrevreads -> [sampleID.tokenize('_')[0], fwdrevreads]}
-
 
 log.info "=============================================================================="
 log.info "Illumina assembly, RNA annotation and Genemark prediction version " + VERSION
@@ -33,14 +41,46 @@ log.info "Isolate : ${params.isolate}"
 log.info "Output  : ${params.outputdir}/${params.isolate}"
 log.info "=============================================================================="
 
-
 reads
 .groupTuple()
 .map {sampleID, ary -> [sampleID, ary.transpose()]}
 .map {sampleID, ary -> [sampleID, ary[0], ary[1]]}
-.set {rawReads}
+.into {rawReads; versions}
 
-//Combine individual read files into one for forward and one for reverse reads
+// Create a file that contains the version numbers of the tools run at the time
+// the pipeline was run
+process versions {
+    tag {sampleID}
+    publishDir "${params.outputdir}/${params.isolate}", mode: 'copy'
+
+    input:
+    set sampleID, "fwd.*.fastq.gz", "rev.*.fastq.gz" from versions
+
+    output:
+    file('versions.txt')
+
+    """
+    echo "Programs and versions used in this pipeline:" >> versions.txt
+    echo date >> versions.txt
+    echo "============================================" >> versions.txt
+    echo "trimmomatic:" >> versions.txt
+    java -jar ${params.trimmomatic} -version >> versions.txt
+    echo "--------------------------------------------" >> versions.txt
+    echo "spades:" >> versions.txt
+    ${params.spades} -v >> versions.txt
+    echo "--------------------------------------------" >> versions.txt
+    echo "GeneMarkES:" >> versions.txt
+    ${params.genemark} | grep 'GeneMark-ES Suite version' >> versions.txt
+    echo "--------------------------------------------" >> versions.txt
+    echo "infernal:" >> versions.txt
+    ${params.infernal_cmpress} -h | grep INFERNAL >> versions.txt
+    echo "--------------------------------------------" >> versions.txt
+    echo "trnaScanSE:" >> versions.txt
+    ${params.trnascan} -h 2>&1 | head -2 | grep tRNAscan >> versions.txt
+    """
+}
+
+// Combine individual read files into one for forward and one for reverse reads
 process combineReads {
     tag {sampleID}
 
@@ -58,7 +98,7 @@ process combineReads {
     """
 }
 
-//Trimmomatic
+// Quality trimming with Trimmomatic
 process trimReads {
     tag {sampleID}
     cpus 5
@@ -74,7 +114,7 @@ process trimReads {
     """
     cp /opt/trimmomatic/current/adapters/NexteraPE-PE.fa .
 
-    java -jar /opt/trimmomatic/current/trimmomatic.jar PE \
+    java -jar ${params.trimmomatic} PE \
     -threads ${task.cpus} \
     fwd.fastq.gz rev.fastq.gz \
     paired.fwd.fastq.gz singles.fwd.fastq.gz \
@@ -85,7 +125,7 @@ process trimReads {
     """
 }
 
-//SPAdes assembly
+// SPAdes short read assembly
 process assemble {
     tag {sampleID}
     publishDir "${params.outputdir}/${sampleID}/01-assembly/spades/", mode: 'copy'
@@ -100,7 +140,7 @@ process assemble {
     set sampleID, "${sampleID}.scaffolds.fasta" into scaffoldsForCleanup
 
     """
-    /opt/spades/current/bin/spades.py \
+    ${params.spades} \
     -k 33,55,77,99 \
     --memory ${task.memory.toGiga()} \
     --threads ${task.cpus} \
@@ -223,7 +263,7 @@ process addSpeciesNameToFastaHeadersContigs {
     """
 }
 
-//GenemarkES annotation
+// de novo gene annotation with GenemarkES
 process annotation_genemark_scaffolds {
     tag {sampleID}
     cpus 10
@@ -236,7 +276,7 @@ process annotation_genemark_scaffolds {
 	set sampleID, "${sampleID}.scaffolds.genemark.gtf"
 
     """
-    /opt/genemark-ES/gmes_petap.pl --ES --fungus --cores ${task.cpus} --sequence ${sampleID}.scaffolds.clean.fasta
+    ${params.genemark} --ES --fungus --cores ${task.cpus} --sequence ${sampleID}.scaffolds.clean.fasta
     mv genemark.gtf ${sampleID}.scaffolds.genemark.gtf
     """
 }
@@ -258,7 +298,7 @@ process annotation_genemark_contigs {
     """
 }
 
-//tRNA annotation with tRNAscanSE
+// tRNA annotation with tRNAscanSE
 process annotation_trnascan_scaffolds {
     tag {sampleID}
     publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
@@ -269,7 +309,7 @@ process annotation_trnascan_scaffolds {
     output:
 	set sampleID, "${sampleID}.scaffolds.trnascanSE.gff3"
     """
-    /home/johannes/local/bin/tRNAscan-SE -o trnascanoutput.out ${sampleID}.scaffolds.clean.fasta 
+    ${params.trnascan} -o trnascanoutput.out ${sampleID}.scaffolds.clean.fasta 
     ${params.scripts}/convert_tRNAScanSE_to_gff3.pl --input=trnascanoutput.out > ${sampleID}.scaffolds.trnascanSE.gff3
     """
 }
@@ -284,12 +324,12 @@ process annotation_trnascan_contigs {
     output:
 	set sampleID, "${sampleID}.contigs.trnascanSE.gff3"
     """
-    /home/johannes/local/bin/tRNAscan-SE -o trnascanoutput.out ${sampleID}.contigs.clean.fasta 
+    ${params.trnascan} -o trnascanoutput.out ${sampleID}.contigs.clean.fasta 
     ${params.scripts}/convert_tRNAScanSE_to_gff3.pl --input=trnascanoutput.out > ${sampleID}.contigs.trnascanSE.gff3
     """
 }
 
-//RNA annotation with infernal
+// RNA annotation with infernal
 process annotaton_infernal_scaffolds {
     tag {sampleID}
     cpus 10
@@ -303,8 +343,8 @@ process annotaton_infernal_scaffolds {
     wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/14.1/Rfam.clanin
     wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/14.1/Rfam.cm.gz
     gzip -d Rfam.cm.gz
-    cmpress Rfam.cm
-    cmscan --rfam --cpu ${task.cpus} --cut_ga --nohmmonly --tblout scaffolds.cmscan.tbl --fmt 2 --clanin Rfam.clanin Rfam.cm ${sampleID}.scaffolds.clean.fasta > infernal.cmscan
+    ${params.infernal_cmpress} Rfam.cm
+    ${params.infernal_cmscan} --rfam --cpu ${task.cpus} --cut_ga --nohmmonly --tblout scaffolds.cmscan.tbl --fmt 2 --clanin Rfam.clanin Rfam.cm ${sampleID}.scaffolds.clean.fasta > infernal.cmscan
     """
 }
 
@@ -321,12 +361,12 @@ process annotaton_infernal_contigs {
     wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/13.0/Rfam.clanin
     wget ftp://ftp.ebi.ac.uk/pub/databases/Rfam/13.0/Rfam.cm.gz
     gzip -d Rfam.cm.gz
-    cmpress Rfam.cm
-    cmscan --rfam --cpu ${task.cpus} --cut_ga --nohmmonly --tblout contigs.cmscan.tbl --fmt 2 --clanin Rfam.clanin Rfam.cm ${sampleID}.contigs.clean.fasta > infernal.cmscan
+    ${params.infernal_cmpress} Rfam.cm
+    ${params.infernal_cmscan} --rfam --cpu ${task.cpus} --cut_ga --nohmmonly --tblout contigs.cmscan.tbl --fmt 2 --clanin Rfam.clanin Rfam.cm ${sampleID}.contigs.clean.fasta > infernal.cmscan
     """
 }
 
-//infernal output conversion to GFF3
+// infernal output conversion to GFF3
 process infernalToGff3scaffolds {
     tag {sampleID}
     publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
