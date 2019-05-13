@@ -1,14 +1,16 @@
 #!/home/johannes/bin nextflow
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 //+++++++++++++++++ SETUP++++++++++++++++++++++++
 // setup paths to programs 
 params.trimmomatic = "/opt/trimmomatic/current/trimmomatic*.jar"
+params.fastp = "fastp"
 params.spades = "/opt/spades/current/bin/spades.py"
 params.genemark = "/opt/genemark-ES/gmes_petap.pl"
 params.infernal_cmpress = "cmpress"
 params.infernal_cmscan = "cmscan"
 params.trnascan = "tRNAscan-SE"
+params.quast = "/opt/quast/current/quast.py"
 
 // point this to the scripts directory of this repository
 params.scripts = "/home/johannes/rdrive/Johannes-DEBLEJ-SE00276/bioinformatics/nf-assembly/scripts"
@@ -20,15 +22,18 @@ params.scripts = "/home/johannes/rdrive/Johannes-DEBLEJ-SE00276/bioinformatics/n
 
 // --> uncomment this for individual isolates
 // ID of isolate you want to assemble
-// params.isolate = "P94-24" 
-// params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/${params.isolate}*_R{1,2}_*fastq.gz"
+ params.isolate = "P94-24" 
+ params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/${params.isolate}*_R{1,2}_*fastq.gz"
 
 // --> uncomment this for all isolates in input folder
-params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/*_R{1,2}_*fastq.gz"
+// params.input = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/Basespace/**/LinaSample*/*_R{1,2}_*fastq.gz"
 
 // Path where output data shall go
 params.outputdir = "/home/johannes/rdrive/PPG_SEQ_DATA-LICHTJ-SE00182/johannes/notebook/test"
 //+++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
 
 // Create channel that provides the sampleID and the raw read files 
 reads = Channel
@@ -45,7 +50,7 @@ reads
 .groupTuple()
 .map {sampleID, ary -> [sampleID, ary.transpose()]}
 .map {sampleID, ary -> [sampleID, ary[0], ary[1]]}
-.into {rawReads; versions}
+.set {rawReads}
 
 // Create a file that contains the version numbers of the tools run at the time
 // the pipeline was run
@@ -53,15 +58,12 @@ process versions {
     tag {sampleID}
     publishDir "${params.outputdir}/${params.isolate}", mode: 'copy'
 
-    input:
-    set sampleID, "fwd.*.fastq.gz", "rev.*.fastq.gz" from versions
-
     output:
     file('versions.txt')
 
     """
     echo "Programs and versions used in this pipeline:" >> versions.txt
-    echo date >> versions.txt
+    date >> versions.txt
     echo "============================================" >> versions.txt
     echo "trimmomatic:" >> versions.txt
     java -jar ${params.trimmomatic} -version >> versions.txt
@@ -77,10 +79,14 @@ process versions {
     echo "--------------------------------------------" >> versions.txt
     echo "trnaScanSE:" >> versions.txt
     ${params.trnascan} -h 2>&1 | head -2 | grep tRNAscan >> versions.txt
+    echo "--------------------------------------------" >> versions.txt
+    echo "Quast:" >> versions.txt
+    ${params.quast} -v >> versions.txt
     """
 }
 
 // Combine individual read files into one for forward and one for reverse reads
+
 process combineReads {
     tag {sampleID}
 
@@ -90,26 +96,26 @@ process combineReads {
     set sampleID, "fwd.*.fastq.gz", "rev.*.fastq.gz" from rawReads
 
     output:
-    set sampleID, "fwd.fastq.gz", "rev.fastq.gz" into rawCombinedReads
+    set sampleID, "${sampleID}.fwd.fastq.gz", "${sampleID}.rev.fastq.gz" into rawCombinedReads
 
     """
-    cat fwd.*.fastq.gz > fwd.fastq.gz
-    cat rev.*.fastq.gz > rev.fastq.gz \
+    cat fwd.*.fastq.gz > ${sampleID}.fwd.fastq.gz
+    cat rev.*.fastq.gz > ${sampleID}.rev.fastq.gz \
     """
 }
 
 // Quality trimming with Trimmomatic
-process trimReads {
+process trimReadsWithTrimmomatic {
     tag {sampleID}
     cpus 5
 
-    publishDir "${params.outputdir}/${sampleID}/00-trimmedReads/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/01-trimmedReads/trimmomatic/", mode: 'copy'
         
     input:
     set sampleID, "fwd.fastq.gz", "rev.fastq.gz" from rawCombinedReads
 
     output:
-    set sampleID, "paired.fwd.fastq.gz", "paired.rev.fastq.gz", "singletons.fastq.gz" into trimmedReads
+    set sampleID, "${sampleID}.trimmed.fwd.fastq.gz", "${sampleID}.trimmed.rev.fastq.gz", "${sampleID}.singletons.fastq.gz" into trimmedReads
 
     """
     cp /opt/trimmomatic/current/adapters/NexteraPE-PE.fa .
@@ -117,18 +123,20 @@ process trimReads {
     java -jar ${params.trimmomatic} PE \
     -threads ${task.cpus} \
     fwd.fastq.gz rev.fastq.gz \
-    paired.fwd.fastq.gz singles.fwd.fastq.gz \
-    paired.rev.fastq.gz singles.rev.fastq.gz \
+    ${sampleID}.trimmed.fwd.fastq.gz singles.fwd.fastq.gz \
+    ${sampleID}.trimmed.rev.fastq.gz singles.rev.fastq.gz \
     ILLUMINACLIP:NexteraPE-PE.fa:2:30:10 SLIDINGWINDOW:4:20 MINLEN:50
 
-    cat singles.*.fastq.gz > singletons.fastq.gz
+    cat singles.*.fastq.gz > ${sampleID}.singletons.fastq.gz
     """
 }
 
-// SPAdes short read assembly
-process assemble {
+// SPAdes short read assembly from Trimmomatic trimmed reads
+// Since Trimmomatic only trims the reads, we want SPAdes to perfom
+// some quality filtering. It does this by default
+process assemblySpades {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/01-assembly/spades/", mode: 'copy'
+    
     memory '25G'
     cpus 10
 
@@ -141,7 +149,7 @@ process assemble {
 
     """
     ${params.spades} \
-    -k 33,55,77,99 \
+    -k 21,33,55,77 \
     --memory ${task.memory.toGiga()} \
     --threads ${task.cpus} \
     --careful \
@@ -231,7 +239,7 @@ process cleanupSpadesOutputContigs {
 
 process addSpeciesNameToFastaHeadersScaffolds {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/01-assembly/spades/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/02-assembly/spades/", mode: 'copy'
 
     input:
     set sampleID, "${sampleID}.scaffolds.clean.fasta" from scaffoldsForHeaderadjustment
@@ -240,6 +248,8 @@ process addSpeciesNameToFastaHeadersScaffolds {
     set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForGenemark
     set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForTRNAscan
     set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForInfernal
+    set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForQuast
+    set sampleID, "${sampleID}.scaffolds.clean.fasta" into scaffoldsRawForFastQC
 
     """
     sed 's,>,&${sampleID}_,g' -i ${sampleID}.scaffolds.clean.fasta
@@ -248,7 +258,7 @@ process addSpeciesNameToFastaHeadersScaffolds {
 
 process addSpeciesNameToFastaHeadersContigs {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/01-assembly/spades/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/02-assembly/spades/", mode: 'copy'
 
     input:
     set sampleID, "${sampleID}.contigs.clean.fasta" from contigsForHeaderadjustment
@@ -257,6 +267,8 @@ process addSpeciesNameToFastaHeadersContigs {
     set sampleID, "${sampleID}.contigs.clean.fasta" into contigsRawForGenemark
     set sampleID, "${sampleID}.contigs.clean.fasta" into contigsRawForTRNAscan
     set sampleID, "${sampleID}.contigs.clean.fasta" into contigsRawForInfernal
+    set sampleID, "${sampleID}.contigs.clean.fasta" into contigsRawForFastQC
+    set sampleID, "${sampleID}.contigs.clean.fasta" into contigsRawForQuast
 
     """
     sed 's,>,&${sampleID}_,g' -i ${sampleID}.contigs.clean.fasta
@@ -267,7 +279,7 @@ process addSpeciesNameToFastaHeadersContigs {
 process annotation_genemark_scaffolds {
     tag {sampleID}
     cpus 10
-    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/03-annotation/", mode: 'copy'
 
     input:
 	set sampleID, "${sampleID}.scaffolds.clean.fasta" from scaffoldsRawForGenemark
@@ -284,7 +296,7 @@ process annotation_genemark_scaffolds {
 process annotation_genemark_contigs {
     tag {sampleID}
     cpus 10
-    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/03-annotation/", mode: 'copy'
 
     input:
 	set sampleID, "${sampleID}.contigs.clean.fasta" from contigsRawForGenemark
@@ -301,7 +313,7 @@ process annotation_genemark_contigs {
 // tRNA annotation with tRNAscanSE
 process annotation_trnascan_scaffolds {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/03-annotation/", mode: 'copy'
 
     input:
 	set sampleID, "${sampleID}.scaffolds.clean.fasta" from scaffoldsRawForTRNAscan
@@ -316,7 +328,7 @@ process annotation_trnascan_scaffolds {
 
 process annotation_trnascan_contigs {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/03-annotation/", mode: 'copy'
 
     input:
 	set sampleID, "${sampleID}.contigs.clean.fasta" from contigsRawForTRNAscan
@@ -369,7 +381,7 @@ process annotaton_infernal_contigs {
 // infernal output conversion to GFF3
 process infernalToGff3scaffolds {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/03-annotation/", mode: 'copy'
 
     input:
 	set sampleID, "scaffolds.cmscan.tbl" from infernalToGff3scaffolds
@@ -383,7 +395,7 @@ process infernalToGff3scaffolds {
 
 process infernalToGff3contigs {
     tag {sampleID}
-    publishDir "${params.outputdir}/${sampleID}/02-annotation/", mode: 'copy'
+    publishDir "${params.outputdir}/${sampleID}/03-annotation/", mode: 'copy'
 
     input:
 	set sampleID, "contigs.cmscan.tbl" from infernalToGff3contigs
@@ -394,6 +406,37 @@ process infernalToGff3contigs {
     grep -v ^# contigs.cmscan.tbl > contigs.cmscan.clean.tbl && awk '{printf "%s\tinfernal\t%s\t%d\t%d\t%s\t%s\t.\tNote=RfamID-%s\\n" ,\$4,\$2,\$10,\$11,\$17,\$12,\$3}'  contigs.cmscan.clean.tbl > ${sampleID}.contigs.infernal.gff3
     """
 }
+
+process quastScaffolds {
+    tag {sampleID}
+    publishDir "${params.outputdir}/${sampleID}/04-QC/scaffolds/", mode: 'copy'
+
+    input: 
+    set sampleID, "${sampleID}.fasta" from scaffoldsRawForQuast
+
+    output:
+    file("quast_results/*") into quastResultsScaffolds
+
+    """
+    ${params.quast} --fungus --conserved-genes-finding --min-contig 0 --threads 10 --split-scaffolds ${sampleID}.fasta
+    """
+}
+
+process quastContigs {
+    tag {sampleID}
+    publishDir "${params.outputdir}/${sampleID}/04-QC/contigs/", mode: 'copy'
+
+    input: 
+    set sampleID, "${sampleID}.fasta" from contigsRawForQuast
+
+    output:
+    file("quast_results/*") into quastResultsContigs
+
+    """
+    ${params.quast} --fungus --conserved-genes-finding --min-contig 0 --threads 10 ${sampleID}.fasta
+    """
+}
+
 
 workflow.onComplete {
     log.info "========================================================"
