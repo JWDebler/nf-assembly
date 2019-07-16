@@ -4,7 +4,6 @@ VERSION = "1.2.0"
 //+++++++++++++++++ SETUP++++++++++++++++++++++++
 // setup paths to programs 
 params.trimmomatic = "/opt/trimmomatic/current/trimmomatic*.jar"
-params.fastp = "fastp"
 params.spades = "/opt/spades/current/bin/spades.py"
 params.genemark = "/opt/genemark-ES/gmes_petap.pl"
 params.infernal_cmpress = "cmpress"
@@ -40,6 +39,7 @@ reads = Channel
 .fromFilePairs(params.input)
 .map {sampleID, fwdrevreads -> [sampleID.tokenize('_')[0], fwdrevreads]}
 
+
 log.info "=============================================================================="
 log.info "Illumina assembly, RNA annotation and Genemark prediction version " + VERSION
 log.info "Isolate : ${params.isolate}"
@@ -51,6 +51,7 @@ reads
 .map {sampleID, ary -> [sampleID, ary.transpose()]}
 .map {sampleID, ary -> [sampleID, ary[0], ary[1]]}
 .set {rawReads}
+
 
 // Create a file that contains the version numbers of the tools run at the time
 // the pipeline was run
@@ -274,6 +275,7 @@ process addSpeciesNameToFastaHeadersContigs {
     sed 's,>,&${sampleID}_,g' -i ${sampleID}.contigs.clean.fasta
     """
 }
+
 
 // de novo gene annotation with GenemarkES
 process annotation_genemark_scaffolds {
